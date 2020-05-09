@@ -60,6 +60,10 @@ aws_vars["AWS_ACCESS_KEY_ID"] = credentials.access_key
 aws_vars["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
 aws_vars["AWS_SESSION_TOKEN"] = credentials.token
 
+for key, value in list(aws_vars.items()):
+    if value is None:
+        del aws_vars[key]
+
 config_mapping = botocore.configprovider.create_botocore_default_config_mapping(bs)
 config_file = config_mapping["config_file"].provide()
 
@@ -143,7 +147,7 @@ if "role_arn" in profile_config:
             "aws_session_token": aws_vars["AWS_SESSION_TOKEN"],
         }
 
-        for key, value in sts_client_args.items():
+        for key, value in list(sts_client_args.items()):
             if not value:
                 del sts_client_args[key]
 
