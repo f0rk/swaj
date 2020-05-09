@@ -1,0 +1,195 @@
+#!/usr/bin/env python
+
+import argparse
+import datetime
+import json
+import os
+import shutil
+import sys
+
+import botocore.session
+import botocore.configloader
+import botocore.configprovider
+import dateutil
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--profile",
+    help=(
+        "profile to use if AWS_PROFILE not set. if AWS_PROFILE is set, this "
+        "will override it."
+    ),
+)
+
+subparsers = parser.add_subparsers(dest="command")
+
+exec_parser = subparsers.add_parser("exec")
+exec_parser.add_argument("command", nargs=argparse.REMAINDER)
+exec_parser.set_defaults(which="exec")
+
+env_parser = subparsers.add_parser("env")
+env_parser.set_defaults(which="env")
+
+eval_parser = subparsers.add_parser("eval")
+eval_parser.set_defaults(which="eval")
+
+args = parser.parse_args()
+
+profile = os.environ.get("AWS_PROFILE")
+if args.profile is not None:
+    profile = args.profile
+
+if profile is None:
+    sys.stderr.write(
+        "unable to locate profile, please set AWS_PROFILE or --profile "
+        "argument\n"
+    )
+    sys.stderr.flush()
+    sys.exit(1)
+
+aws_vars = {}
+for var_name, var_value in os.environ.items():
+    if var_name.startswith("AWS_"):
+        aws_vars[var_name] = var_value
+
+bs = botocore.session.Session(profile=profile)
+
+credentials = bs.get_credentials()
+aws_vars["AWS_ACCESS_KEY_ID"] = credentials.access_key
+aws_vars["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
+aws_vars["AWS_SESSION_TOKEN"] = credentials.token
+
+config_mapping = botocore.configprovider.create_botocore_default_config_mapping(bs)
+config_file = config_mapping["config_file"].provide()
+
+config = botocore.configloader.multi_file_load_config(config_file)
+
+profile_config = config.get("profiles", {}).get(profile, {})
+
+def get_state_path():
+    return os.path.expanduser("~/.swajdb")
+
+def load_state():
+    state_path = get_state_path()
+    if not os.path.exists(state_path):
+        return {}
+    else:
+        with open(state_path, "rt+") as fp:
+            return json.load(fp)
+
+def store_state(state):
+    state_path = get_state_path()
+    with open(state_path, "wt+") as fp:
+        os.chmod(state_path, 0o600)
+
+        json.dump(state, fp)
+
+state = load_state()
+
+time_format = "%Y-%m-%dT%H:%M:%SZ"
+current_time = datetime.datetime.now(tz=dateutil.tz.tzutc())
+formatted_current_time = current_time.strftime(time_format)
+
+if "mfa_serial" in profile_config:
+
+    mfa_serial = profile_config["mfa_serial"]
+
+    if mfa_serial in state:
+        mfa_serial_expiration = state[mfa_serial]["AWS_SESSION_EXPIRATION"]
+        if formatted_current_time > mfa_serial_expiration:
+            del state[mfa_serial]
+
+    if mfa_serial in state:
+        aws_vars.update(state[mfa_serial])
+    else:
+        token_code = input("enter token for mfa_serial {}: ".format(mfa_serial))
+
+        sts_client = bs.create_client("sts")
+
+        get_session_token_resp = sts_client.get_session_token(
+            SerialNumber=mfa_serial,
+            TokenCode=token_code,
+        )
+
+        aws_vars["AWS_ACCESS_KEY_ID"] = get_session_token_resp["Credentials"]["AccessKeyId"]
+        aws_vars["AWS_SECRET_ACCESS_KEY"] = get_session_token_resp["Credentials"]["SecretAccessKey"]
+        aws_vars["AWS_SESSION_TOKEN"] = get_session_token_resp["Credentials"]["SessionToken"]
+        aws_vars["AWS_SESSION_EXPIRATION"] = get_session_token_resp["Credentials"]["Expiration"].strftime(time_format)
+
+    if mfa_serial not in state:
+        state[mfa_serial] = {}
+
+    state[mfa_serial].update(aws_vars)
+
+    store_state(state)
+
+if "role_arn" in profile_config:
+
+    role_arn = profile_config["role_arn"]
+    
+    if role_arn in state:
+        role_arn_expiration = state[role_arn]["AWS_SESSION_EXPIRATION"]
+        if formatted_current_time > role_arn_expiration:
+            del state[role_arn]
+
+    if role_arn in state:
+        aws_vars.update(state[role_arn])
+    else:
+        sts_client_args = {
+            "service_name": "sts",
+            "aws_access_key_id": aws_vars["AWS_ACCESS_KEY_ID"],
+            "aws_secret_access_key": aws_vars["AWS_SECRET_ACCESS_KEY"],
+            "aws_session_token": aws_vars["AWS_SESSION_TOKEN"],
+        }
+
+        for key, value in sts_client_args.items():
+            if not value:
+                del sts_client_args[key]
+
+        sts_client = bs.create_client(**sts_client_args)
+
+        assume_role_resp = sts_client.assume_role(
+            RoleArn=role_arn,
+        )
+
+        aws_vars["AWS_ACCESS_KEY_ID"] = get_session_token_resp["Credentials"]["AccessKeyId"]
+        aws_vars["AWS_SECRET_ACCESS_KEY"] = get_session_token_resp["Credentials"]["SecretAccessKey"]
+        aws_vars["AWS_SESSION_TOKEN"] = get_session_token_resp["Credentials"]["SessionToken"]
+        aws_vars["AWS_SESSION_EXPIRATION"] = get_session_token_resp["Credentials"]["Expiration"].strftime(time_format)
+
+    if role_arn not in state:
+        state[role_arn] = {}
+
+    state[role_arn].update(aws_vars)
+
+    store_state(state)
+
+new_environ = os.environ.copy()
+new_environ.update(aws_vars)
+
+if args.which == "env":
+    for key, value in new_environ.items():
+        print("{}={}".format(key, value))
+elif args.which == "eval":
+    for key, value in new_environ.items():
+        if key.startswith("AWS_"):
+            print("export {}={}".format(key, value))
+elif args.which == "exec":
+    if args.command:
+        new_command = args.command
+    else:
+        new_command = [os.environ.get("SHELL", "/bin/sh")]
+
+    exec_path = new_command[0]
+    if not "/" in exec_path:
+        maybe_exec_path = shutil.which(exec_path)
+        if maybe_exec_path:
+            exec_path = maybe_exec_path
+
+    os.execve(exec_path, new_command, new_environ)
+else:
+    raise Exception(
+        "Implementation Error: unknown value for args.which {}"
+        .format(args.which)
+    )
