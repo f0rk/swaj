@@ -71,6 +71,12 @@ config = botocore.configloader.multi_file_load_config(config_file)
 
 profile_config = config.get("profiles", {}).get(profile, {})
 
+sts_client = bs.create_client("sts")
+original_identity = sts_client.get_caller_identity()
+user_arn = original_identity["Arn"]
+user_name_part = user_arn.split(":")[-1]
+user_name = user_name_part.split("/")[-1]
+
 def get_state_path():
     return os.path.expanduser("~/.swajdb")
 
@@ -128,9 +134,9 @@ if "mfa_serial" in profile_config:
 
     store_state(state)
 
-if "role_arn" in profile_config:
+if "swaj_role_arn" in profile_config:
 
-    role_arn = profile_config["role_arn"]
+    role_arn = profile_config["swaj_role_arn"]
     
     if role_arn in state:
         role_arn_expiration = state[role_arn]["AWS_SESSION_EXPIRATION"]
@@ -153,14 +159,21 @@ if "role_arn" in profile_config:
 
         sts_client = bs.create_client(**sts_client_args)
 
-        assume_role_resp = sts_client.assume_role(
-            RoleArn=role_arn,
+        role_session_name = "{}-{}-{}".format(
+            user_name,
+            profile,
+            datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
         )
 
-        aws_vars["AWS_ACCESS_KEY_ID"] = get_session_token_resp["Credentials"]["AccessKeyId"]
-        aws_vars["AWS_SECRET_ACCESS_KEY"] = get_session_token_resp["Credentials"]["SecretAccessKey"]
-        aws_vars["AWS_SESSION_TOKEN"] = get_session_token_resp["Credentials"]["SessionToken"]
-        aws_vars["AWS_SESSION_EXPIRATION"] = get_session_token_resp["Credentials"]["Expiration"].strftime(time_format)
+        assume_role_resp = sts_client.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName=role_session_name,
+        )
+
+        aws_vars["AWS_ACCESS_KEY_ID"] = assume_role_resp["Credentials"]["AccessKeyId"]
+        aws_vars["AWS_SECRET_ACCESS_KEY"] = assume_role_resp["Credentials"]["SecretAccessKey"]
+        aws_vars["AWS_SESSION_TOKEN"] = assume_role_resp["Credentials"]["SessionToken"]
+        aws_vars["AWS_SESSION_EXPIRATION"] = assume_role_resp["Credentials"]["Expiration"].strftime(time_format)
 
     if role_arn not in state:
         state[role_arn] = {}
@@ -171,6 +184,7 @@ if "role_arn" in profile_config:
 
 new_environ = os.environ.copy()
 new_environ.update(aws_vars)
+new_environ["SWAJ"] = "1"
 
 if args.which == "env":
     for key, value in new_environ.items():

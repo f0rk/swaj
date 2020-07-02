@@ -9,7 +9,11 @@ TOTP code once and run commands until the temporary credentials provided by AWS
 expire.
 
 Requires python, botocore, and dateutil. Run: `pip install botocore` (dateutil
-is a dependency of botocore) to get everything you need.
+is a dependency of botocore) to get everything you by default.
+
+If you'd like to use the built-in TOTP functionality (instead of an app, like
+Google Authenticator or Authy), you'll also need to install pyotp, like so:
+`pip install pyotp`.
 
 Configuration
 =============
@@ -23,6 +27,16 @@ software-based devices), place the serial of that device in your
 region = us-west-1
 mfa_serial = arn:aws:iam::000000000000:mfa/jimmy
 ```
+
+Additionally, if you wish to assume a role, you can configure it like so:
+```
+[profile admin]
+region = us-west-1
+mfa_serial = arn:aws:iam::000000000000:mfa/jimmy
+swaj_role_arn = arn:aws:iam::000000000000:role/admin
+```
+
+This usage is non-standard but is a workaround for a bug in botocore.
 
 Usage
 =====
