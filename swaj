@@ -186,6 +186,11 @@ new_environ = os.environ.copy()
 new_environ.update(aws_vars)
 new_environ["SWAJ"] = "1"
 
+do_remove_profile = False
+if "AWS_PROFILE" in new_environ:
+    do_remove_profile = True
+    del new_environ["AWS_PROFILE"]
+
 if args.which == "env":
     for key, value in new_environ.items():
         print("{}={}".format(key, value))
@@ -193,6 +198,9 @@ elif args.which == "eval":
     for key, value in new_environ.items():
         if key.startswith("AWS_"):
             print("export {}={}".format(key, value))
+
+    if do_remove_profile:
+        print("unset AWS_PROFILE")
 elif args.which == "exec":
     if args.command:
         new_command = args.command
