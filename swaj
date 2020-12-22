@@ -6,11 +6,13 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 import botocore.session
 import botocore.configloader
 import botocore.configprovider
 import dateutil
+import lockfile
 
 
 parser = argparse.ArgumentParser()
@@ -33,6 +35,9 @@ env_parser.set_defaults(which="env")
 
 eval_parser = subparsers.add_parser("eval")
 eval_parser.set_defaults(which="eval")
+
+refresh_parser = subparsers.add_parser("refresh")
+refresh_parser.set_defaults(which="refresh")
 
 args = parser.parse_args()
 
@@ -80,6 +85,9 @@ user_name = user_name_part.split("/")[-1]
 def get_state_path():
     return os.path.expanduser("~/.swajdb")
 
+def get_lock_path():
+    return os.path.join(tempfile.gettempdir(), "swaj.lock")
+
 def load_state():
     state_path = get_state_path()
     if not os.path.exists(state_path):
@@ -90,10 +98,19 @@ def load_state():
 
 def store_state(state):
     state_path = get_state_path()
-    with open(state_path, "wt+") as fp:
-        os.chmod(state_path, 0o600)
+    lock_path = get_lock_path()
+    lock = lockfile.LockFile(lock_path)
 
-        json.dump(state, fp)
+    try:
+        lock.acquire(timeout=10)
+
+        with open(state_path, "wt+") as fp:
+            os.chmod(state_path, 0o600)
+
+            json.dump(state, fp)
+
+    finally:
+        lock.release()
 
 state = load_state()
 
@@ -105,6 +122,10 @@ if "mfa_serial" in profile_config:
 
     mfa_serial = profile_config["mfa_serial"]
 
+    if args.which == "refresh":
+        if mfa_serial in state:
+            del state[mfa_serial]
+
     if mfa_serial in state:
         mfa_serial_expiration = state[mfa_serial]["AWS_SESSION_EXPIRATION"]
         if formatted_current_time > mfa_serial_expiration:
@@ -113,7 +134,15 @@ if "mfa_serial" in profile_config:
     if mfa_serial in state:
         aws_vars.update(state[mfa_serial])
     else:
-        token_code = input("enter token for mfa_serial {}: ".format(mfa_serial))
+        if sys.stdout.isatty():
+            token_code = input("enter token for mfa_serial {}: ".format(mfa_serial))
+        else:
+            sys.stderr.write(
+                "not an interactive terminal, unable to collect token for "
+                "mfa_serial!\n"
+            )
+            sys.stderr.flush()
+            sys.exit(1)
 
         sts_client = bs.create_client("sts")
 
@@ -137,6 +166,10 @@ if "mfa_serial" in profile_config:
 if "swaj_role_arn" in profile_config:
 
     role_arn = profile_config["swaj_role_arn"]
+
+    if args.which == "refresh":
+        if role_arn in state:
+            del state[role_arn]
     
     if role_arn in state:
         role_arn_expiration = state[role_arn]["AWS_SESSION_EXPIRATION"]
@@ -159,11 +192,7 @@ if "swaj_role_arn" in profile_config:
 
         sts_client = bs.create_client(**sts_client_args)
 
-        role_session_name = "{}-{}-{}".format(
-            user_name,
-            profile,
-            datetime.datetime.now().strftime("%Y%m%d%H%M%S"),
-        )
+        role_session_name = user_name
 
         assume_role_resp = sts_client.assume_role(
             RoleArn=role_arn,
@@ -185,18 +214,21 @@ if "swaj_role_arn" in profile_config:
 new_environ = os.environ.copy()
 new_environ.update(aws_vars)
 new_environ["SWAJ"] = "1"
+new_environ["SWAJ_PROFILE"] = profile
 
 do_remove_profile = False
 if "AWS_PROFILE" in new_environ:
     do_remove_profile = True
     del new_environ["AWS_PROFILE"]
 
-if args.which == "env":
+if args.which == "refresh":
+    pass
+elif args.which == "env":
     for key, value in new_environ.items():
         print("{}={}".format(key, value))
 elif args.which == "eval":
     for key, value in new_environ.items():
-        if key.startswith("AWS_"):
+        if key.startswith("AWS_") or key.startswith("SWAJ_"):
             print("export {}={}".format(key, value))
 
     if do_remove_profile:
