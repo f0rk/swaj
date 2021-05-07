@@ -8,12 +8,19 @@ throwing up people until they have to open a beach."
 TOTP code once and run commands until the temporary credentials provided by AWS
 expire.
 
-Requires python, botocore, and dateutil. Run: `pip install botocore` (dateutil
-is a dependency of botocore) to get everything you by default.
+Requires python.
 
 If you'd like to use the built-in TOTP functionality (instead of an app, like
 Google Authenticator or Authy), you'll also need to install pyotp, like so:
 `pip install pyotp`.
+
+Install
+=======
+
+```!sh
+$ curl https://raw.githubusercontent.com/f0rk/swaj/master/tools/swaj-standalone > ~/bin/swaj
+$ chmod +x ~/bin/swaj
+```
 
 Configuration
 =============
