@@ -5,14 +5,65 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 
+import botocore.exceptions
 import botocore.session
 import botocore.configloader
 import botocore.configprovider
 import dateutil
 import lockfile
+
+
+def get_aws_vars(bs, profile):
+
+    aws_vars = {}
+    for var_name, var_value in os.environ.items():
+        if var_name.startswith("AWS_"):
+            aws_vars[var_name] = var_value
+
+    credentials = bs.get_credentials()
+    aws_vars["AWS_ACCESS_KEY_ID"] = credentials.access_key
+    aws_vars["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
+    aws_vars["AWS_SESSION_TOKEN"] = credentials.token
+
+    for key, value in list(aws_vars.items()):
+        if value is None:
+            del aws_vars[key]
+
+    return aws_vars
+
+
+def sso_login(profile):
+    if sys.stdout.isatty():
+        sso_args = [
+            "aws",
+            "sso",
+            "login",
+            "--profile",
+            profile,
+        ]
+        sso_login = subprocess.Popen(sso_args)
+        sso_login_stdout, sso_login_stderr = sso_login.communicate()
+
+        if sso_login.returncode:
+            raise Exception(
+                "{} failed: {} {}"
+                .format(
+                    " ".join(sso_args),
+                    sso_login_stdout,
+                    sso_login_stderr,
+                )
+            )
+    else:
+        sys.stderr.write(
+            "not an interactive terminal, unable to run sso login "
+            "interactively!\n"
+        )
+        sys.stderr.flush()
+        sys.exit(1)
 
 
 def main():
@@ -55,21 +106,13 @@ def main():
         sys.stderr.flush()
         sys.exit(1)
 
-    aws_vars = {}
-    for var_name, var_value in os.environ.items():
-        if var_name.startswith("AWS_"):
-            aws_vars[var_name] = var_value
-
     bs = botocore.session.Session(profile=profile)
 
-    credentials = bs.get_credentials()
-    aws_vars["AWS_ACCESS_KEY_ID"] = credentials.access_key
-    aws_vars["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
-    aws_vars["AWS_SESSION_TOKEN"] = credentials.token
-
-    for key, value in list(aws_vars.items()):
-        if value is None:
-            del aws_vars[key]
+    try:
+        aws_vars = get_aws_vars(bs, profile)
+    except botocore.exceptions.SSOTokenLoadError:
+        sso_login(profile)
+        aws_vars = get_aws_vars(bs, profile)
 
     config_mapping = botocore.configprovider.create_botocore_default_config_mapping(bs)
     config_file = config_mapping["config_file"].provide()
