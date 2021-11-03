@@ -4,9 +4,11 @@ swaj
 "If you watch the movie Jaws backwards, it's a movie about a shark that keeps
 throwing up people until they have to open a beach."
 
-`swaj` is a tool to simplify using MFA with AWS. It allows you to enter in your
-TOTP code once and run commands until the temporary credentials provided by AWS
-expire.
+`swaj` is a tool to simplify using multiple sets of credentials with AWS. If
+you have multiple profiles, `swaj` eliminates the need to constantly re-export
+values when using MFA or SSO. `swaj` is especially helpful when using MFA in
+that it persists the temporary session credentials, minimizing the number of
+times an OTP code must be entered.
 
 Requires python.
 
@@ -24,6 +26,9 @@ $ chmod +x ~/bin/swaj
 
 Configuration
 =============
+
+If you wish to use swaj to more safely use profiles, no additional
+configuration is needed.
 
 If you wish to use an MFA device (currently, the AWS API only supports
 software-based devices), place the serial of that device in your
@@ -44,6 +49,9 @@ swaj_role_arn = arn:aws:iam::000000000000:role/admin
 ```
 
 This usage is non-standard but is a workaround for a bug in botocore.
+
+Using SSO is straightforward, just configure your SSO normally and `swaj` will
+ensure you are authenticated.
 
 Usage
 =====
