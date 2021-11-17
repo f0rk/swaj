@@ -5,7 +5,7 @@ from setuptools import setup
 
 setup(
     name="swaj",
-    version="0.5",
+    version="0.6",
     description="AWS + CLI + MFA (pronounced like swage)",
     author="Ryan P. Kelly",
     author_email="ryan@ryankelly.us",
