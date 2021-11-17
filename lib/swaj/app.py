@@ -113,6 +113,9 @@ def main():
     except botocore.exceptions.SSOTokenLoadError:
         sso_login(profile)
         aws_vars = get_aws_vars(bs, profile)
+    except botocore.exceptions.UnauthorizedSSOTokenError:
+        sso_login(profile)
+        aws_vars = get_aws_vars(bs, profile)
 
     config_mapping = botocore.configprovider.create_botocore_default_config_mapping(bs)
     config_file = config_mapping["config_file"].provide()
