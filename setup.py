@@ -1,11 +1,11 @@
-# Copyright 2021, Ryan P. Kelly.
+# Copyright 2021-2026, Ryan P. Kelly.
 
 from setuptools import setup
 
 
 setup(
     name="swaj",
-    version="0.6",
+    version="1.0",
     description="AWS + CLI + MFA (pronounced like swage)",
     author="Ryan P. Kelly",
     author_email="ryan@ryankelly.us",
@@ -24,7 +24,7 @@ setup(
     include_package_data=True,
     zip_safe=False,
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Environment :: Console",
         "Intended Audience :: Developers",
         "Intended Audience :: System Administrators",
